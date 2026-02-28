@@ -1,0 +1,16 @@
+# Video transcription pipeline: WhisperX + yt-dlp
+# Python 3.10+ recommended
+
+# ASR and alignment
+whisperx>=3.1.0
+# PyTorch: по умолчанию pip ставит CPU-версию.
+# Чтобы использовать GPU (CUDA), установите вручную ДО установки остального:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+# Затем: pip install -r requirements.txt (пропустит уже установленные torch/torchaudio)
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Video download
+yt-dlp>=2024.1.1
+
+# FFmpeg must be installed separately (system dependency)
