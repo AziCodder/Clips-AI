@@ -1,0 +1,17 @@
+[Unit]
+Description=Clips GPU Worker (WhisperX)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/clips/gpu-worker
+EnvironmentFile=/root/clips/gpu-worker/.env
+ExecStart=/root/clips/gpu-worker/.venv/bin/python -m worker.main
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
