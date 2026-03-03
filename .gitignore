@@ -1,25 +1,188 @@
-# Python
+# ─── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
 *.egg-info/
+.eggs/
 dist/
 build/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# venv
+eggs/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
 .venv/
 venv/
 env/
+ENV/
+.conda/
 
-# IDE
+# Byte-compiled / optimized / DLL files
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
+*.whl
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+nosetests.xml
+
+# mypy / type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff / linters
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+celerybeat.db
+
+# ─── Node / Frontend (Vite, React) ─────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+gpu-worker/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+frontend/dist/
+frontend/build/
+*.tsbuildinfo
+.vite/
+*.local
+
+# Env (frontend)
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# ─── Секреты и конфиги окружения ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+
+# Все env-файлы в infra (содержат секреты) — не коммитить
+infra/env/*.env
+infra/env/*.env.local
+# Разрешить только примеры (создайте cpu-backend.env.example без секретов)
+!infra/env/*.env.example
+
+# ─── IDE / редакторы ──────────────────────────────────────────────────────────
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
 
-# OS
+# ─── ОС ──────────────────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# logs
+# ─── Логи и временные файлы ──────────────────────────────────────────────────
 *.log
+logs/
+debug-*.log
+/tmp/
+temp/
+tmp/
+*.tmp
+*.temp
+*.bak
+*.cache
+
+# ─── Медиа и артефакты (транскрипция, скачивание) ─────────────────────────────
+*.flac
+*.wav
+*.mp4
+*.mp3
+*.mkv
+*.webm
+output/
+transcribe_output/
+
+# Директория воркера (локальные копии)
+/tmp/clips_worker/
+
+# ─── Базы данных (локальные / дампы) ────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# ─── Docker (локальные переопределения) ────────────────────────────────────────
+docker-compose.override.yml
+docker-compose.*.local.yml
+.docker/
+
+# ─── Миграции Alembic (кэш и сгенерированные) ───────────────────────────────
+cpu-backend/app/db/migrations/__pycache__/
+**/migrations/__pycache__/
+
+# ─── Прочее ───────────────────────────────────────────────────────────────────
+*.pid
+*.seed
+*.pid.lock
+.npm
+.eslintcache
+.stylelintcache
+*.tgz
+.yarn-integrity
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+.vercel
+.env.backup

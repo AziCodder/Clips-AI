@@ -1,0 +1,3 @@
+# Тесты (установка: pip install -r requirements-dev.txt)
+pytest>=7.0.0
+pytest-mock>=3.0.0

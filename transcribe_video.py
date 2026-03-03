@@ -532,8 +532,8 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="output",
-        help="Директория для выходных файлов и временных (по умолчанию: output)",
+        default=os.path.abspath("output"),
+        help="Директория для выходных файлов и временных (по умолчанию: ./output относительно CWD)",
     )
     parser.add_argument(
         "--model-dir",
@@ -668,6 +668,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-"""текст"""
