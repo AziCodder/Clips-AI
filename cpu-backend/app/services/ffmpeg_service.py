@@ -26,7 +26,9 @@ def extract_audio_flac(video_path: str, output_dir: str) -> str:
     log.info("Extracting audio: %s -> %s", video_path, out_path)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg audio extract failed: {result.stderr[:500]}")
+        err = result.stderr.strip().splitlines()
+        tail = "\n".join(err[-15:]) if err else "(no stderr)"
+        raise RuntimeError(f"ffmpeg audio extract failed:\n{tail}")
     if not os.path.isfile(out_path):
         raise FileNotFoundError(f"ffmpeg did not create: {out_path}")
     return os.path.abspath(out_path)
@@ -71,7 +73,9 @@ def cut_clip(
     log.info("Cutting clip: %s [%.1f-%.1f] -> %s", video_path, start_sec, end_sec, output_path)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg clip cut failed: {result.stderr[:500]}")
+        err = result.stderr.strip().splitlines()
+        tail = "\n".join(err[-15:]) if err else "(no stderr)"
+        raise RuntimeError(f"ffmpeg clip cut failed:\n{tail}")
     if not os.path.isfile(output_path):
         raise FileNotFoundError(f"ffmpeg did not create clip: {output_path}")
     return os.path.abspath(output_path)

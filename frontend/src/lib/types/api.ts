@@ -20,6 +20,8 @@ export interface Video {
   views: number
   duration_sec: number
   status: string
+  download_progress_pct?: number | null
+  error_message?: string | null
   thumbnail_url: string
   created_at: string
 }

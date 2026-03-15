@@ -110,6 +110,10 @@ infra/env/*.env.local
 # Разрешить только примеры (создайте cpu-backend.env.example без секретов)
 !infra/env/*.env.example
 
+# Файлы cookies для yt-dlp (YouTube) — не коммитить
+infra/env/cookies/*.txt
+infra/env/cookies/*.json
+
 # ─── IDE / редакторы ──────────────────────────────────────────────────────────
 .idea/
 .vscode/

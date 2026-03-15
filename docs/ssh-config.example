@@ -1,0 +1,7 @@
+# Пример блока для ~/.ssh/config (Windows: C:\Users\<Имя>\.ssh\config)
+# Скопируй ниже в свой config и замени YOUR_SERVER_IP на IP сервера из panel.hostkey.com
+
+Host hostkey-clips
+    HostName YOUR_SERVER_IP
+    User deploy
+    IdentityFile ~/.ssh/id_ed25519

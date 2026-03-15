@@ -74,6 +74,12 @@ async def mark_started(
     job.status = JobStatus.STARTED
     job.lease_owner = body.worker_id
     job.started_at = body.started_at
+
+    video_result = await db.execute(select(Video).where(Video.id == job.video_id))
+    video = video_result.scalar_one_or_none()
+    if video:
+        video.status = VideoStatus.TRANSCRIBING
+
     await db.commit()
 
 
@@ -164,7 +170,10 @@ async def check_ack(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 async def cleanup_done(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(TranscriptionJob).where(TranscriptionJob.id == job_id))
     job = result.scalar_one_or_none()
-    if job:
+    # Only mark cleanup done for terminal statuses — don't clobber QUEUED when
+    # mark_failed returned the job to the retry queue.
+    _terminal = (JobStatus.ACKNOWLEDGED, JobStatus.FAILED, JobStatus.TIMED_OUT, JobStatus.CANCELLED)
+    if job and job.status in _terminal:
         job.status = JobStatus.CLEANUP_DONE
         await db.commit()
 

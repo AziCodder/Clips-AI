@@ -17,6 +17,12 @@ app.conf.beat_schedule = {
         "task": "app.tasks.pipeline_tasks.task_download_approved",
         "schedule": crontab(hour=11, minute=0),
     },
+    # 14:00 MSK — queue transcription jobs for any AUDIO_READY videos and
+    # start GPU if needed (catch-all in case download task was interrupted)
+    "start-gpu-pod": {
+        "task": "app.tasks.pipeline_tasks.task_start_gpu_pod",
+        "schedule": crontab(hour=14, minute=0),
+    },
     # 01:00 MSK — LLM analysis of transcribed videos
     "llm-analysis": {
         "task": "app.tasks.pipeline_tasks.task_run_llm_analysis",

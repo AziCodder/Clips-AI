@@ -47,6 +47,8 @@ app = FastAPI(
 _cors_origins: list[str]
 if settings.ENV != "production":
     _cors_origins = ["*"]
+elif settings.FRONTEND_ORIGIN in ("*", "any"):
+    _cors_origins = ["*"]  # для доступа по IP без домена
 else:
     _cors_origins = [settings.FRONTEND_ORIGIN] if settings.FRONTEND_ORIGIN else []
 

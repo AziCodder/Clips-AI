@@ -22,6 +22,8 @@ class VideoRead(BaseModel):
     views: int
     duration_sec: int
     status: str
+    download_progress_pct: int | None = None
+    error_message: str | None = None
     thumbnail_url: str
     created_at: datetime
     already_exists: bool = False

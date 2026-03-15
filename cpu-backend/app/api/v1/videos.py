@@ -32,6 +32,8 @@ def _to_read(v: Video) -> VideoRead:
         views=v.views,
         duration_sec=v.duration_sec,
         status=v.status,
+        download_progress_pct=getattr(v, "download_progress_pct", None),
+        error_message=getattr(v, "error_message", None),
         thumbnail_url=v.thumbnail_url,
         created_at=v.created_at,
     )
@@ -49,6 +51,8 @@ def _to_detail(v: Video) -> VideoDetailRead:
         views=v.views,
         duration_sec=v.duration_sec,
         status=v.status,
+        download_progress_pct=getattr(v, "download_progress_pct", None),
+        error_message=getattr(v, "error_message", None),
         thumbnail_url=v.thumbnail_url,
         created_at=v.created_at,
         description=v.description,
@@ -111,7 +115,13 @@ async def add_manual_video(
     try:
         info = dry_run_check(body.url)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"URL недоступен для скачивания: {exc}")
+        msg = str(exc)
+        if "Sign in to confirm" in msg or "cookies" in msg.lower():
+            msg += (
+                " Настройте cookies: положите youtube_cookies.txt в infra/env/cookies/, "
+                "перезапустите api и celery_worker. См. docs/YOUTUBE_COOKIES.md"
+            )
+        raise HTTPException(status_code=400, detail=f"URL недоступен для скачивания: {msg}")
 
     now = datetime.now(timezone.utc)
     video = Video(

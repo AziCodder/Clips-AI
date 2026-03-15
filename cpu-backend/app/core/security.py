@@ -22,8 +22,12 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
+    # Primary scheme (current): bcrypt(SHA256(password))
     secret = _password_for_bcrypt(plain)
-    return bcrypt.checkpw(secret, hashed.encode("utf-8"))
+    if bcrypt.checkpw(secret, hashed.encode("utf-8")):
+        return True
+    # Backward compatibility for old accounts: bcrypt(password)
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
 def create_access_token(subject: str, extra: dict[str, Any] | None = None) -> str:

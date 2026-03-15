@@ -1,0 +1,36 @@
+# Virtual env and Python cache
+.venv
+venv
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+.eggs
+*.egg
+
+# Env and secrets (use env_file in compose)
+.env
+.env.*
+!.env.example
+
+# Git and IDE
+.git
+.gitignore
+.cursor
+.idea
+.vscode
+*.swp
+*.swo
+
+# Tests and coverage
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.mypy_cache
+
+# Docs and misc
+*.md
+!README.md

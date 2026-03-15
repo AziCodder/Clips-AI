@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -144,14 +145,44 @@ def task_download_approved(self):
         videos = db.query(Video).filter(Video.status == VideoStatus.APPROVED).all()
         log.info("Downloading %d approved videos", len(videos))
 
+        cookies_file = None
+        if getattr(settings, "YTDLP_COOKIES_FILE", None) and os.path.isfile(settings.YTDLP_COOKIES_FILE):
+            cookies_file = settings.YTDLP_COOKIES_FILE
+
         for video in videos:
             try:
                 video.status = VideoStatus.DOWNLOADING
+                video.download_progress_pct = 0
+                video.error_message = None
                 db.commit()
 
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    # Download
-                    video_path = download_video(video.url, tmpdir)
+                    progress_state = {"last_pct": -1, "last_commit_ts": 0.0}
+
+                    def _on_download_progress(pct: float, _status: str) -> None:
+                        pct_i = max(0, min(100, int(round(pct))))
+                        now_ts = time.monotonic()
+                        # Avoid overly chatty DB updates while keeping UI smooth enough.
+                        if pct_i == progress_state["last_pct"] and (now_ts - progress_state["last_commit_ts"]) < 2.0:
+                            return
+                        if pct_i < progress_state["last_pct"]:
+                            return
+                        try:
+                            video.download_progress_pct = pct_i
+                            db.commit()
+                            progress_state["last_pct"] = pct_i
+                            progress_state["last_commit_ts"] = now_ts
+                        except Exception:
+                            db.rollback()
+
+                    # Download (cookies needed for YouTube/VK etc.)
+                    video_path = download_video(
+                        video.url,
+                        tmpdir,
+                        cookies_file=cookies_file,
+                        progress_callback=_on_download_progress,
+                    )
+                    video.download_progress_pct = 100
 
                     # Upload master video
                     master_key = f"videos/{video.id}/master.mp4"
@@ -185,8 +216,13 @@ def task_download_approved(self):
                     db.commit()
 
             except Exception as exc:
-                log.error("Failed to download video %s: %s", video.id, exc)
+                log.exception("Failed to download video %s: %s", video.id, exc)
                 video.status = VideoStatus.FAILED
+                video.download_progress_pct = None
+                try:
+                    video.error_message = (str(exc) or repr(exc))[:500]
+                except Exception:
+                    video.error_message = "Unknown error"
                 db.commit()
 
     log.info("task_download_approved done")
@@ -251,9 +287,9 @@ def task_ensure_gpu_running(self):
     and no instance is already running (idempotent: calling twice is safe).
     Stores instance_id in Redis to avoid starting duplicates.
     """
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, func
     from sqlalchemy.orm import Session
-    from app.db.models import TranscriptionJob, JobStatus, User
+    from app.db.models import TranscriptionJob, JobStatus, User, Video
     from app.services import vastai_service, telegram_service
 
     engine = create_engine(settings.SYNC_DATABASE_URL)
@@ -280,8 +316,37 @@ def task_ensure_gpu_running(self):
                 log.warning("task_ensure_gpu_running: failed to check instance %s: %s", existing_id, exc)
             r.delete(REDIS_GPU_INSTANCE_KEY)
 
-        log.info("task_ensure_gpu_running: %d queued jobs — starting Vast.ai instance", queued_count)
-        instance_id = asyncio.run(vastai_service.start_instance())
+        total_duration_sec = (
+            db.query(func.coalesce(func.sum(Video.duration_sec), 0))
+            .join(TranscriptionJob, TranscriptionJob.video_id == Video.id)
+            .filter(TranscriptionJob.status == JobStatus.QUEUED)
+            .scalar()
+            or 0
+        )
+        total_duration_min = int(total_duration_sec // 60)
+
+        profile = settings.VASTAI_SELECTION_PROFILE
+        if profile == "auto":
+            if (
+                queued_count >= settings.VASTAI_PROFILE_SPEED_QUEUE_MIN
+                or total_duration_min >= settings.VASTAI_PROFILE_SPEED_TOTAL_MINUTES_MIN
+            ):
+                profile = "speed"
+            elif (
+                queued_count <= settings.VASTAI_PROFILE_ECONOMY_QUEUE_MAX
+                and total_duration_min <= settings.VASTAI_PROFILE_ECONOMY_TOTAL_MINUTES_MAX
+            ):
+                profile = "economy"
+            else:
+                profile = "balanced"
+
+        log.info(
+            "task_ensure_gpu_running: queued=%d total_min=%d — starting Vast.ai instance (profile=%s)",
+            queued_count,
+            total_duration_min,
+            profile,
+        )
+        instance_id = asyncio.run(vastai_service.start_instance(selection_profile=profile))
         if instance_id is None:
             log.warning("task_ensure_gpu_running: failed to start Vast.ai instance")
             admin = db.query(User).filter(User.telegram_id != None, User.is_active == True).first()

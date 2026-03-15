@@ -86,7 +86,7 @@ def process_job(job: dict) -> None:
         # Report completed to CPU
         ack_data = cpu_client.mark_completed(
             job_id,
-            s3_prefix_result=prefix,
+            s3_prefix=prefix,
             duration_sec=elapsed,
             language=detected_lang,
         )

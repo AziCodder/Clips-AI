@@ -8,6 +8,8 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
+    port: 5173,
+    host: true, // слушать на всех интерфейсах (localhost, 127.0.0.1, IP)
     proxy: {
       '/api': 'http://localhost:8000',
     },

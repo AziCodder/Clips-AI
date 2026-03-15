@@ -20,10 +20,19 @@ const PIPELINE_STAGES: { key: string; label: string }[] = [
 ]
 const STAGE_ORDER = PIPELINE_STAGES.map(s => s.key)
 
-function PipelineProgress({ status }: { status: string }) {
+function PipelineProgress({
+  status,
+  errorMessage,
+  downloadProgressPct,
+}: {
+  status: string
+  errorMessage?: string | null
+  downloadProgressPct?: number | null
+}) {
   if (['pending_approval', 'found', 'rejected'].includes(status)) return null
   const failed = status === 'failed'
   const currentIdx = failed ? -1 : STAGE_ORDER.indexOf(status)
+  const safePct = Math.max(0, Math.min(100, Number(downloadProgressPct ?? 0)))
 
   return (
     <div className="bg-white border border-neutral-200 rounded-xl p-4">
@@ -53,12 +62,31 @@ function PipelineProgress({ status }: { status: string }) {
           )
         })}
         {failed && (
-          <div className="flex items-center gap-2.5 mt-1">
-            <div className="w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shrink-0 text-xs font-bold">✕</div>
-            <span className="text-xs text-red-600 font-semibold">Ошибка обработки</span>
+          <div className="mt-1 space-y-1">
+            <div className="flex items-center gap-2.5">
+              <div className="w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shrink-0 text-xs font-bold">✕</div>
+              <span className="text-xs text-red-600 font-semibold">Ошибка обработки</span>
+            </div>
+            {errorMessage && (
+              <p className="text-xs text-red-700 bg-red-50 rounded p-2 mt-1 break-words">{errorMessage}</p>
+            )}
           </div>
         )}
       </div>
+      {status === 'downloading' && (
+        <div className="mt-3">
+          <div className="flex items-center justify-between text-xs text-blue-700 mb-1">
+            <span className="font-medium">Скачивание видео</span>
+            <span>{safePct}%</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-blue-100 overflow-hidden">
+            <div
+              className="h-full bg-blue-500 transition-all duration-300"
+              style={{ width: `${safePct}%` }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -82,21 +110,26 @@ export function VideoDetailPage() {
   const loadAll = useCallback(async (initial = false) => {
     if (!id) return
     if (initial) setLoading(true)
+    const presignedPromise =
+      !initial && presignedUrl
+        ? Promise.resolve(null)
+        : mediaApi.presigned(id, 'master_video').catch(() => null)
     const [videoRes, presRes, transcRes, hlRes, clipRes] = await Promise.all([
       videosApi.get(id),
-      mediaApi.presigned(id, 'master_video').catch(() => null),
+      presignedPromise,
       mediaApi.transcript(id).catch(() => null),
       mediaApi.highlights(id).catch(() => null),
       mediaApi.clips(id).catch(() => null),
     ])
     setVideo(videoRes.data)
-    setPresignedUrl(presRes?.data?.url ?? null)
+    const nextPresigned = presRes?.data?.url ?? null
+    setPresignedUrl((prev) => prev ?? nextPresigned)
     setTranscript(transcRes?.data ?? null)
     setHighlights(hlRes?.data ?? [])
     setClips(clipRes?.data ?? [])
     if (initial) setLoading(false)
     return videoRes.data.status
-  }, [id])
+  }, [id, presignedUrl])
 
   // Initial load
   useEffect(() => {
@@ -107,10 +140,11 @@ export function VideoDetailPage() {
   useEffect(() => {
     if (!video) return
     if (!isProcessing(video.status)) return
+    const intervalMs = video.status === 'downloading' ? 2000 : 8000
     const timer = setInterval(async () => {
       const newStatus = await loadAll()
       if (newStatus && !isProcessing(newStatus)) clearInterval(timer)
-    }, 8000)
+    }, intervalMs)
     return () => clearInterval(timer)
   }, [video?.status, loadAll])
 
@@ -262,7 +296,11 @@ export function VideoDetailPage() {
 
         {/* Right: Pipeline + Tabs */}
         <div className="space-y-4">
-          <PipelineProgress status={video.status} />
+          <PipelineProgress
+            status={video.status}
+            errorMessage={video.error_message}
+            downloadProgressPct={video.download_progress_pct}
+          />
 
           <div className="flex gap-1 bg-neutral-100 p-1 rounded-lg">
             {(['transcript', 'highlights', 'clips'] as const).map(tab => (

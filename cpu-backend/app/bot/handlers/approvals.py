@@ -218,7 +218,15 @@ async def handle_approval_callback(callback: CallbackQuery):
                 task_download_approved.apply_async(queue="pipeline")
                 log.info("task_download_approved triggered after TG approval %d", approval_id)
             except Exception as exc:
-                log.warning("Could not trigger task_download_approved: %s", exc)
+                log.exception("Could not trigger task_download_approved: %s", exc)
+                err_text = (str(exc) or repr(exc))[:400]
+                try:
+                    await callback.message.answer(
+                        f"⚠️ Не удалось запустить загрузку видео (ошибка очереди):\n<code>{err_text}</code>",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
 
         try:
             await callback.message.edit_reply_markup(reply_markup=None)

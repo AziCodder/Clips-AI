@@ -48,6 +48,8 @@ class Video(Base):
     publish_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_sec: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(50), default=VideoStatus.FOUND)
+    download_progress_pct: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     thumbnail_url: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
