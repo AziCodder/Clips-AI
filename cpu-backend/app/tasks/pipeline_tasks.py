@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -272,7 +272,7 @@ def task_start_gpu_pod(self):
 
 
 REDIS_GPU_INSTANCE_KEY = "clips:gpu_instance_id"
-REDIS_GPU_INSTANCE_TTL = 86400  # 24h
+REDIS_GPU_INSTANCE_TTL = 2592000  # 30d, keep single-instance id across idle periods
 
 
 def _get_redis():
@@ -308,13 +308,20 @@ def task_ensure_gpu_running(self):
         if existing_id:
             try:
                 status_str = asyncio.run(vastai_service.get_instance_status(int(existing_id)))
-                if status_str in ("CONNECT", "OPEN"):
-                    log.info("task_ensure_gpu_running: instance %s already running (%s), skipping", existing_id, status_str)
+                if status_str in ("CONNECT", "OPEN", "RUNNING", "CREATING", "LOADING", "STARTING", "SCHEDULED"):
+                    log.info("task_ensure_gpu_running: instance %s already active (%s), skipping", existing_id, status_str)
                     return
-                log.info("task_ensure_gpu_running: instance %s status=%s, clearing and starting new", existing_id, status_str)
+                if status_str in ("INACTIVE", "STOPPED", "EXITED", "OFFLINE"):
+                    started = asyncio.run(vastai_service.start_existing_instance(int(existing_id)))
+                    if started:
+                        r.set(REDIS_GPU_INSTANCE_KEY, str(existing_id), ex=REDIS_GPU_INSTANCE_TTL)
+                        log.info("task_ensure_gpu_running: started existing instance %s from %s", existing_id, status_str)
+                        return
+                    log.warning("task_ensure_gpu_running: could not start existing instance %s from %s", existing_id, status_str)
+                else:
+                    log.info("task_ensure_gpu_running: instance %s status=%s, will try fallback start", existing_id, status_str)
             except Exception as exc:
-                log.warning("task_ensure_gpu_running: failed to check instance %s: %s", existing_id, exc)
-            r.delete(REDIS_GPU_INSTANCE_KEY)
+                log.warning("task_ensure_gpu_running: failed to check/start existing instance %s: %s", existing_id, exc)
 
         total_duration_sec = (
             db.query(func.coalesce(func.sum(Video.duration_sec), 0))
@@ -365,9 +372,8 @@ def task_ensure_gpu_running(self):
 @shared_task(name="app.tasks.pipeline_tasks.task_destroy_idle_gpu", bind=True)
 def task_destroy_idle_gpu(self):
     """
-    Destroy Vast.ai GPU instance when there are no QUEUED or LEASED jobs.
-    GPU worker exits after IDLE_SHUTDOWN_SEC (60s) with no jobs; this task
-    runs every 2 min and destroys the instance to stop billing.
+    Stop (do not destroy) Vast.ai GPU instance when there are no active jobs.
+    This preserves disk/cache and dramatically reduces cold-start time.
     """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
@@ -381,7 +387,7 @@ def task_destroy_idle_gpu(self):
         ).count()
 
     if active_count > 0:
-        log.debug("task_destroy_idle_gpu: %d active jobs, skipping destroy", active_count)
+        log.debug("task_destroy_idle_gpu: %d active jobs, skipping stop", active_count)
         return
 
     r = _get_redis()
@@ -391,14 +397,14 @@ def task_destroy_idle_gpu(self):
 
     try:
         instance_id = int(instance_id_str)
-        ok = asyncio.run(vastai_service.destroy_instance(instance_id))
+        ok = asyncio.run(vastai_service.stop_instance(instance_id))
         if ok:
-            r.delete(REDIS_GPU_INSTANCE_KEY)
-            log.info("task_destroy_idle_gpu: destroyed instance %s (no more jobs)", instance_id)
+            r.set(REDIS_GPU_INSTANCE_KEY, str(instance_id), ex=REDIS_GPU_INSTANCE_TTL)
+            log.info("task_destroy_idle_gpu: stopped instance %s (no more jobs)", instance_id)
         else:
-            log.warning("task_destroy_idle_gpu: failed to destroy instance %s", instance_id)
+            log.warning("task_destroy_idle_gpu: failed to stop instance %s", instance_id)
     except Exception as exc:
-        log.warning("task_destroy_idle_gpu: error destroying %s: %s", instance_id_str, exc)
+        log.warning("task_destroy_idle_gpu: error stopping %s: %s", instance_id_str, exc)
 
 
 # ── Stage 4: LLM Analysis (01:00 MSK) ────────────────────────────────────────
@@ -668,3 +674,63 @@ def task_reaper(self):
         task_ensure_gpu_running.apply_async(queue="pipeline")
 
     log.info("task_reaper done: processed %d stale jobs", len(stale))
+
+
+# ── Extract audio for manually uploaded video ─────────────────────────────────
+
+@shared_task(name="app.tasks.pipeline_tasks.task_extract_audio_for_video", bind=True, max_retries=2)
+def task_extract_audio_for_video(self, video_id_str: str):
+    """
+    For videos uploaded directly (status=UPLOADED):
+    download master.mp4 from S3, extract FLAC audio, upload back to S3,
+    then queue for GPU transcription.
+    """
+    import tempfile
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.db.models import Video, VideoStatus, Asset, AssetType
+    from app.services.ffmpeg_service import extract_audio_flac
+    from app.services import s3_service
+
+    engine = create_engine(settings.SYNC_DATABASE_URL)
+    with Session(engine) as db:
+        video = db.get(Video, uuid.UUID(video_id_str))
+        if not video:
+            log.error("task_extract_audio_for_video: video %s not found", video_id_str)
+            return
+
+        try:
+            master_asset = db.query(Asset).filter(
+                Asset.video_id == video.id,
+                Asset.type == AssetType.MASTER_VIDEO,
+            ).first()
+            if not master_asset:
+                raise FileNotFoundError(f"No master_video asset for video {video.id}")
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_video = os.path.join(tmpdir, "master.mp4")
+                log.info("Downloading master video %s from S3", master_asset.s3_key)
+                s3_service.download_file(master_asset.s3_key, local_video)
+
+                audio_path = extract_audio_flac(local_video, tmpdir)
+                audio_key = f"videos/{video.id}/audio/audio.flac"
+                audio_size = s3_service.upload_file(audio_path, audio_key, "audio/flac")
+                db.add(Asset(video_id=video.id, type=AssetType.AUDIO, s3_key=audio_key, size_bytes=audio_size))
+
+                video.status = VideoStatus.AUDIO_READY
+                video.error_message = None
+                db.commit()
+                log.info("Audio extracted for uploaded video %s -> %s", video.id, audio_key)
+
+        except Exception as exc:
+            log.exception("task_extract_audio_for_video failed for %s: %s", video_id_str, exc)
+            video.status = VideoStatus.FAILED
+            try:
+                video.error_message = str(exc)[:500]
+            except Exception:
+                pass
+            db.commit()
+            return
+
+    task_start_gpu_pod.apply_async(queue="pipeline")
+    log.info("task_extract_audio_for_video done for video %s", video_id_str)

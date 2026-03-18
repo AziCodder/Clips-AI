@@ -92,23 +92,23 @@ export interface User {
   role: string
   is_active: boolean
 }
-
 export const VIDEO_STATUS_LABELS: Record<string, string> = {
-  found: 'Найдено',
-  pending_approval: 'На подтверждении',
-  approved: 'Одобрено',
-  rejected: 'Отклонено',
-  downloading: 'Скачивается',
-  downloaded: 'Скачано',
-  audio_ready: 'Аудио готово',
-  queued_gpu: 'В очереди GPU',
-  transcribing: 'Транскрибируется',
-  transcribed: 'Транскрибировано',
-  analyzing: 'Анализируется',
-  analyzed: 'Проанализировано',
-  clips_rendering: 'Нарезка клипов',
-  clips_ready: 'Клипы готовы',
-  failed: 'Ошибка',
+  found: '\u041d\u0430\u0439\u0434\u0435\u043d\u043e',
+  pending_approval: '\u041d\u0430 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0438',
+  approved: '\u041e\u0434\u043e\u0431\u0440\u0435\u043d\u043e',
+  rejected: '\u041e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u043e',
+  downloading: '\u0421\u043a\u0430\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f',
+  downloaded: '\u0421\u043a\u0430\u0447\u0430\u043d\u043e',
+  audio_ready: '\u0410\u0443\u0434\u0438\u043e \u0433\u043e\u0442\u043e\u0432\u043e',
+  queued_gpu: '\u0412 \u043e\u0447\u0435\u0440\u0435\u0434\u0438 GPU',
+  transcribing: '\u0422\u0440\u0430\u043d\u0441\u043a\u0440\u0438\u0431\u0438\u0440\u0443\u0435\u0442\u0441\u044f',
+  transcribed: '\u0422\u0440\u0430\u043d\u0441\u043a\u0440\u0438\u0431\u0438\u0440\u043e\u0432\u0430\u043d\u043e',
+  analyzing: '\u0410\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u0443\u0435\u0442\u0441\u044f',
+  analyzed: '\u041f\u0440\u043e\u0430\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043d\u043e',
+  clips_rendering: '\u041d\u0430\u0440\u0435\u0437\u043a\u0430 \u043a\u043b\u0438\u043f\u043e\u0432',
+  uploaded: '\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u043e',
+  clips_ready: '\u041a\u043b\u0438\u043f\u044b \u0433\u043e\u0442\u043e\u0432\u044b',
+  failed: '\u041e\u0448\u0438\u0431\u043a\u0430',
 }
 
 export const STATUS_COLORS: Record<string, string> = {
@@ -125,6 +125,7 @@ export const STATUS_COLORS: Record<string, string> = {
   analyzing: 'bg-indigo-100 text-indigo-800',
   analyzed: 'bg-indigo-100 text-indigo-800',
   clips_rendering: 'bg-orange-100 text-orange-800',
+  uploaded: 'bg-sky-100 text-sky-800',
   clips_ready: 'bg-emerald-100 text-emerald-800',
   failed: 'bg-red-100 text-red-800',
 }

@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """
-WhisperX transcription and alignment — adapted from transcribe_video.py.
-GPU-only, runs one job at a time.
+Hybrid transcription: Transformers pipeline (insanely-fast-whisper style) + WhisperX alignment.
+GPU-only, runs one job at a time. Maximizes speed on transcribe step, keeps precise word-level timestamps via alignment.
 """
 
 import gc
@@ -13,8 +13,6 @@ from pathlib import Path
 
 from worker.config import settings
 from worker.io_layout import (
-    audio_path,
-    job_dir,
     meta_json,
     segments_json,
     subtitles_srt,
@@ -25,84 +23,137 @@ from worker.io_layout import (
 log = logging.getLogger(__name__)
 
 
+def _pipeline_result_to_segments(pipe_result: dict) -> list[dict]:
+    """
+    Convert Transformers pipeline output to WhisperX-style segments: [{"start": float, "end": float, "text": str}].
+    """
+    segments = []
+    chunks = pipe_result.get("chunks") or []
+    for ch in chunks:
+        text = (ch.get("text") or "").strip()
+        if not text:
+            continue
+        ts = ch.get("timestamp")
+        if ts is None:
+            continue
+        if isinstance(ts, (list, tuple)) and len(ts) >= 2:
+            start, end = float(ts[0]), float(ts[1])
+        elif isinstance(ts, dict):
+            start = float(ts.get("start", 0))
+            end = float(ts.get("end", 0))
+        else:
+            continue
+        segments.append({"start": start, "end": end, "text": text})
+    return segments
+
+
 def transcribe_and_align(
     wav_path: str,
     out_dir: str,
     language: str | None = None,
 ) -> dict:
     """
-    Run WhisperX large-v3 + alignment.
-    Returns result dict with segments and language.
-    Mirrors transcribe_video.py::transcribe_and_align but uses worker config.
+    Run Transformers pipeline (Whisper large-v3 + Flash Attention 2 / SDPA) for fast transcription,
+    then WhisperX alignment for precise word-level timestamps.
+    Returns result dict with segments (with words) and language - same format as before for save_outputs().
     """
+    import torch
     import whisperx
-    from whisperx.utils import get_writer
+    from transformers import pipeline
+    from transformers.utils import is_flash_attn_2_available
 
     device = settings.WHISPER_DEVICE
-    compute_type = settings.WHISPER_COMPUTE_TYPE
     batch_size = settings.WHISPER_BATCH_SIZE
     model_dir = settings.WHISPER_MODEL_DIR or None
+    use_flash = settings.WHISPER_USE_FLASH_ATTN
 
     if device == "cpu":
         batch_size = min(batch_size, 4)
 
-    log.info("Loading WhisperX large-v3 (device=%s, batch_size=%d)...", device, batch_size)
-    model = whisperx.load_model(
-        settings.WHISPER_MODEL,
+    attn_impl = "flash_attention_2" if (use_flash and is_flash_attn_2_available()) else "sdpa"
+    log.info(
+        "Loading Transformers pipeline %s (device=%s, batch_size=%d, attn=%s)...",
+        settings.WHISPER_MODEL_NAME,
         device,
-        compute_type=compute_type,
-        download_root=model_dir,
-        language=language,
+        batch_size,
+        attn_impl,
     )
-    audio = whisperx.load_audio(wav_path)
-    log.info("Transcribing...")
-    result = model.transcribe(audio, batch_size=batch_size)
+    pipe = pipeline(
+        "automatic-speech-recognition",
+        model=settings.WHISPER_MODEL_NAME,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+        device=0 if device == "cuda" else -1,
+        model_kwargs={"attn_implementation": attn_impl},
+    )
 
-    del model
+    log.info("Transcribing...")
+    gen_kwargs = {}
+    if language:
+        gen_kwargs["language"] = language
+    pipe_result = pipe(
+        wav_path,
+        chunk_length_s=30,
+        batch_size=batch_size,
+        return_timestamps=True,
+        generate_kwargs=gen_kwargs if gen_kwargs else None,
+    )
+    if isinstance(pipe_result, list) and len(pipe_result) == 1:
+        pipe_result = pipe_result[0]
+    if isinstance(pipe_result, dict) and "chunks" not in pipe_result and "text" in pipe_result:
+        pipe_result = {"text": pipe_result["text"], "chunks": pipe_result.get("chunks", [])}
+
+    segments = _pipeline_result_to_segments(pipe_result)
+    detected_lang = (
+        pipe_result.get("language") or (language or "en")
+    )
+    if isinstance(detected_lang, (list, tuple)):
+        detected_lang = detected_lang[0] if detected_lang else "en"
+    result = {"language": detected_lang, "segments": segments}
+
+    del pipe
     gc.collect()
     if device == "cuda":
-        import torch
         torch.cuda.empty_cache()
 
-    detected_lang = result.get("language") or "en"
-    segments = result.get("segments") or []
+    if not segments:
+        log.warning("No segments from pipeline, skipping alignment")
+        return result
 
-    if segments:
-        log.info("Aligning (language=%s)...", detected_lang)
-        align_model = None
-        align_metadata = None
-        try:
-            align_model, align_metadata = whisperx.load_align_model(
-                language_code=detected_lang,
-                device=device,
-                model_dir=model_dir,
-            )
-        except Exception as exc:
-            log.warning("Alignment model not available for %s: %s", detected_lang, exc)
+    log.info("Aligning (language=%s)...", detected_lang)
+    align_model = None
+    align_metadata = None
+    try:
+        align_model, align_metadata = whisperx.load_align_model(
+            language_code=detected_lang,
+            device=device,
+            model_dir=model_dir,
+        )
+    except Exception as exc:
+        log.warning("Alignment model not available for %s: %s", detected_lang, exc)
 
-        if align_model is not None:
-            result = whisperx.align(
-                result["segments"],
-                align_model,
-                align_metadata,
-                wav_path,
-                device,
-            )
-            result["language"] = detected_lang
-            del align_model
+    if align_model is not None and align_metadata is not None:
+        result = whisperx.align(
+            result["segments"],
+            align_model,
+            align_metadata,
+            wav_path,
+            device,
+        )
+        result["language"] = detected_lang
+        del align_model
 
-        gc.collect()
-        if device == "cuda":
-            import torch
-            torch.cuda.empty_cache()
+    gc.collect()
+    if device == "cuda":
+        torch.cuda.empty_cache()
 
     return result
 
 
 def save_outputs(result: dict, out_dir: str, job_id: str, wav_path: str) -> None:
     """
-    Save WhisperX result to out_dir:
+    Save result to out_dir:
       transcript.txt, words.json, segments.json, subtitles.srt, meta.json
+    Uses WhisperX get_writer when segments have word-level data; otherwise writes from result dict.
     """
     from whisperx.utils import get_writer
 
@@ -113,7 +164,6 @@ def save_outputs(result: dict, out_dir: str, job_id: str, wav_path: str) -> None
     # .txt
     writer_txt = get_writer("txt", out_dir)
     writer_txt(result, wav_path, writer_opts)
-    # rename to standard name
     actual_txt = os.path.join(out_dir, Path(wav_path).stem + ".txt")
     target_txt = os.path.join(out_dir, "transcript.txt")
     if os.path.isfile(actual_txt) and actual_txt != target_txt:

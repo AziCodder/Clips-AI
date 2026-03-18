@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """
 GPU Worker main loop.
@@ -141,8 +141,8 @@ def main() -> None:
         settings.JOB_MAX_DURATION_SEC,
     )
     from worker.health import start_health_server
-    start_health_server(port=8080)
-    log.info("Health endpoint: http://0.0.0.0:8080/health")
+    start_health_server(port=settings.HEALTH_PORT)
+    log.info("Health endpoint: http://0.0.0.0:%s/health", settings.HEALTH_PORT)
 
     idle_since = time.time()
 
@@ -171,7 +171,7 @@ def main() -> None:
 
         if not finished_in_time:
             log.error(
-                "Job %s exceeded max duration %ds — reporting timeout to CPU and exiting",
+                "Job %s exceeded max duration %ds вЂ” reporting timeout to CPU and exiting",
                 job_id,
                 settings.JOB_MAX_DURATION_SEC,
             )

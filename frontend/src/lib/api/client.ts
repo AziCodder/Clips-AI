@@ -1,4 +1,4 @@
-import axios from 'axios'
+﻿import axios from 'axios'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
@@ -49,6 +49,17 @@ export const videosApi = {
   get: (id: string) => api.get(`/videos/${id}`),
   addManual: (url: string, topic_id?: string, auto_approve?: boolean) =>
     api.post('/videos/manual', { url, topic_id, auto_approve: auto_approve ?? false }),
+  upload: (file: File, title: string, topic_id: string, auto_process: boolean, onProgress?: (pct: number) => void) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('title', title)
+    form.append('topic_id', topic_id)
+    form.append('auto_process', String(auto_process))
+    return api.post('/videos/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (e) => { if (onProgress && e.total) onProgress(Math.round(e.loaded * 100 / e.total)) },
+    })
+  },
   requestAnalysis: (id: string) =>
     api.post(`/videos/${id}/request-analysis`),
   recomputeHighlights: (id: string) =>

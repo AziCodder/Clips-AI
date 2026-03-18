@@ -19,6 +19,41 @@ def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {settings.VASTAI_API_KEY}"}
 
 
+def _build_onstart_command() -> str:
+    """
+    Build a robust onstart command for fresh Vast.ai instances.
+
+    If user configured a custom command, keep it as-is.
+    If legacy value points to a local file path that may not exist on a clean
+    instance, replace it with a bootstrap command that clones the repo first.
+    """
+    raw = (settings.VASTAI_ONSTART or "").strip()
+    legacy_values = {
+        "bash /root/clips/infra/vastai-onstart.sh",
+        "/bin/bash /root/clips/infra/vastai-onstart.sh",
+    }
+    if raw and raw not in legacy_values:
+        return raw
+
+    if raw in legacy_values:
+        log.warning(
+            "VASTAI_ONSTART uses legacy local path; switching to bootstrap command for clean instances"
+        )
+
+    # Robust default: ensure repo exists, then run project onstart script.
+    # Keep REPO_URL overridable via GIT_REPO_URL env on Vast side.
+    return (
+        "bash -lc 'set -e; "
+        "export PATH=/usr/local/bin:/usr/bin:/bin:$PATH; "
+        "REPO_URL=${GIT_REPO_URL:-https://github.com/AziCodder/Clips-AI.git}; "
+        "REPO_DIR=/root/clips; "
+        "if [ ! -d \"$REPO_DIR/.git\" ]; then rm -rf \"$REPO_DIR\"; git clone \"$REPO_URL\" \"$REPO_DIR\"; fi; "
+        "cd \"$REPO_DIR\"; "
+        "git pull --ff-only || true; "
+        "bash \"$REPO_DIR/infra/vastai-onstart.sh'"
+    )
+
+
 def _instance_status(instance: dict[str, Any]) -> str:
     return str(
         instance.get("actual_status")
@@ -76,7 +111,7 @@ def _pick_existing_instance(instances: list[dict[str, Any]]) -> dict[str, Any] |
                 continue
             if inst_id == preferred_id:
                 return inst
-        return None
+        # Preferred ID not found - pick any by GPU
 
     filtered = [
         inst
@@ -229,7 +264,7 @@ async def start_instance(selection_profile: str | None = None) -> int | None:
         return None
     resolved_profile = _resolve_selection_profile(selection_profile)
 
-    if settings.VASTAI_REUSE_EXISTING_FIRST:
+    if settings.VASTAI_REUSE_EXISTING_FIRST or settings.VASTAI_NEVER_CREATE_NEW:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 f"{VASTAI_API_BASE}/instances/",
@@ -273,6 +308,9 @@ async def start_instance(selection_profile: str | None = None) -> int | None:
                             return None
             else:
                 log.warning("Vast.ai list instances failed: %s", resp.text[:300])
+
+    if settings.VASTAI_NEVER_CREATE_NEW:
+        return None
 
     # 1) Search offers
     base_search_body: dict[str, Any] = {
@@ -362,8 +400,9 @@ async def start_instance(selection_profile: str | None = None) -> int | None:
             "S3_BUCKET": settings.S3_BUCKET,
         },
     }
-    if settings.VASTAI_ONSTART:
-        create_body["onstart"] = settings.VASTAI_ONSTART
+    onstart_cmd = _build_onstart_command()
+    if onstart_cmd:
+        create_body["onstart"] = onstart_cmd
 
     async with httpx.AsyncClient(timeout=60) as client:
         for idx, offer in enumerate(candidate_offers, start=1):
@@ -437,6 +476,32 @@ async def destroy_instance(instance_id: int) -> bool:
         )
     ok = resp.status_code == 200
     log.info("Vast.ai destroy instance %s: %s", instance_id, "OK" if ok else resp.text[:200])
+    return ok
+
+
+async def start_existing_instance(instance_id: int) -> bool:
+    """Start an already existing Vast.ai instance (state=running)."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(
+            f"{VASTAI_API_BASE}/instances/{instance_id}/",
+            json={"state": "running"},
+            headers=_headers(),
+        )
+    ok = resp.status_code == 200
+    log.info("Vast.ai start existing instance %s: %s", instance_id, "OK" if ok else resp.text[:200])
+    return ok
+
+
+async def stop_instance(instance_id: int) -> bool:
+    """Stop (do not destroy) a Vast.ai instance to preserve disk/cache."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(
+            f"{VASTAI_API_BASE}/instances/{instance_id}/",
+            json={"state": "stopped"},
+            headers=_headers(),
+        )
+    ok = resp.status_code == 200
+    log.info("Vast.ai stop instance %s: %s", instance_id, "OK" if ok else resp.text[:200])
     return ok
 
 

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,10 +14,10 @@ class WorkerSettings(BaseSettings):
     S3_SECRET_KEY: str
     S3_BUCKET: str
 
-    WHISPER_MODEL: str = "large-v3"
+    WHISPER_MODEL_NAME: str = "openai/whisper-large-v3"
     WHISPER_DEVICE: str = "cuda"
-    WHISPER_COMPUTE_TYPE: str = "float16"
-    WHISPER_BATCH_SIZE: int = 8
+    WHISPER_BATCH_SIZE: int = 24
+    WHISPER_USE_FLASH_ATTN: bool = True
     WHISPER_MODEL_DIR: str = "/root/.cache/whisperx"
 
     WORKER_ID: str = "gpu-worker-1"

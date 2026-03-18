@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     VASTAI_PREFERRED_INSTANCE_ID: int | None = None  # explicit existing instance to reuse/start
     VASTAI_REUSE_EXISTING_FIRST: bool = True
     VASTAI_PREFERRED_STRICT: bool = False  # True => fail if preferred instance not usable
+    VASTAI_NEVER_CREATE_NEW: bool = True  # only start existing instances, never rent new
 
     @field_validator(
         "VASTAI_DPH_MIN",

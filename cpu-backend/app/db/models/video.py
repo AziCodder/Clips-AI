@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
@@ -24,6 +24,7 @@ class VideoStatus:
     ANALYZED = "analyzed"
     CLIPS_RENDERING = "clips_rendering"
     CLIPS_READY = "clips_ready"
+    UPLOADED = "uploaded"
     FAILED = "failed"
 
 

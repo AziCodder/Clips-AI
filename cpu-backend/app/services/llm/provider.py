@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -54,23 +54,45 @@ class OpenAILLMProvider:
         client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
         system_msg = (
-            "You are an expert video editor. "
-            "Given a video transcript and instructions, identify the most engaging moments. "
-            "Return a JSON array of highlight objects."
+            "You are an expert viral short-form video editor specializing in hooks and attention retention. "
+            "Your goal is to find moments that will STOP someone mid-scroll and make them watch to the end. "
+            "CRITICAL RULE: The FIRST clip in your list MUST be the single strongest hook from the ENTIRE transcript — "
+            "a moment that creates immediate curiosity, tension, surprise, or an emotional reaction in the first 3 seconds. "
+            "Strong hook patterns: shocking statement, unanswered question, unexpected reveal, "
+            "emotional peak, contrarian take, or a moment that makes viewer think 'wait, what?'. "
+            "Remaining clips should also be highly engaging and self-contained (watchable without context). "
+            "Return a JSON array of highlight objects, sorted by hook_strength DESC."
         )
-        user_msg = f"""
-Instructions: {prompt}
 
-Transcript:
-{transcript[:12000]}
+        # Smart truncation: keep beginning + end for full context
+        max_chars = 20000
+        if len(transcript) > max_chars:
+            half = max_chars // 2
+            transcript_trimmed = (
+                transcript[:half]
+                + "\n\n[... middle section omitted for brevity ...]\n\n"
+                + transcript[-half:]
+            )
+        else:
+            transcript_trimmed = transcript
 
-Find exactly {clips_count} highlights. Return ONLY valid JSON array like:
+        user_msg = f"""Instructions: {prompt}
+
+Transcript (with timestamps):
+{transcript_trimmed}
+
+Find exactly {clips_count} clips. The FIRST clip MUST be the strongest hook from anywhere in the transcript.
+Return ONLY a valid JSON array:
 [
-  {{"start_sec": 12.5, "end_sec": 45.0, "score": 0.95, "title": "Title", "reason": "Why this is great"}},
+  {{"start_sec": 12.5, "end_sec": 45.0, "score": 0.95, "title": "Hook title", "reason": "Why this stops the scroll"}},
   ...
 ]
-The start_sec and end_sec should be seconds from the transcript timestamps.
-Each clip should be 20-90 seconds long.
+Rules:
+- start_sec / end_sec must match actual timestamps in the transcript
+- Each clip: 20-90 seconds long
+- First clip: strongest possible hook (shocking, surprising, or emotionally charged)
+- Score 0.0-1.0 where 1.0 = viral-ready hook
+- No duplicate time ranges
 """
         response = await client.chat.completions.create(
             model=settings.OPENAI_MODEL,
@@ -79,25 +101,32 @@ Each clip should be 20-90 seconds long.
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.3,
-            max_tokens=2000,
+            max_tokens=3000,
         )
         raw = response.choices[0].message.content or "[]"
-        # Extract JSON from response
+        # Extract JSON array from response (handles markdown code fences)
         start = raw.find("[")
         end = raw.rfind("]") + 1
         if start == -1 or end == 0:
             log.warning("LLM returned no JSON array, raw: %s", raw[:200])
             return []
-        data = json.loads(raw[start:end])
+        try:
+            data = json.loads(raw[start:end])
+        except json.JSONDecodeError as exc:
+            log.warning("LLM JSON parse error: %s | raw: %s", exc, raw[:300])
+            return []
         results = []
         for item in data:
-            results.append(HighlightResult(
-                start_sec=float(item.get("start_sec", 0)),
-                end_sec=float(item.get("end_sec", 0)),
-                score=float(item.get("score", 0.5)),
-                title=item.get("title", ""),
-                reason=item.get("reason", ""),
-            ))
+            try:
+                results.append(HighlightResult(
+                    start_sec=float(item.get("start_sec", 0)),
+                    end_sec=float(item.get("end_sec", 0)),
+                    score=float(item.get("score", 0.5)),
+                    title=str(item.get("title", "")),
+                    reason=str(item.get("reason", "")),
+                ))
+            except (TypeError, ValueError) as exc:
+                log.warning("Skipping malformed highlight item %s: %s", item, exc)
         return results
 
 

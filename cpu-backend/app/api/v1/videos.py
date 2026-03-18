@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -321,3 +321,92 @@ async def delete_video(
         await db.commit()
         await db.refresh(video)
         return
+
+
+@router.post("/upload", response_model=VideoRead, status_code=201)
+async def upload_video(
+    file: UploadFile = File(...),
+    title: str = Form(default=""),
+    topic_id: str = Form(default=""),
+    auto_process: bool = Form(default=True),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Upload a local video file directly to S3 and start the processing pipeline."""
+    import io, uuid as _uuid, tempfile, shutil
+    from app.services import s3_service as _s3
+    from app.db.models import Asset, AssetType
+
+    ALLOWED_TYPES = {"video/mp4", "video/quicktime", "video/x-matroska", "video/webm", "video/avi", "video/x-msvideo"}
+    ct = file.content_type or ""
+    if ct and ct not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ct}. Use mp4, mkv, webm or mov.")
+
+    filename = file.filename or "video.mp4"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "mp4"
+    if ext not in ("mp4", "mkv", "webm", "mov", "avi"):
+        raise HTTPException(status_code=400, detail=f"Unsupported extension: .{ext}")
+
+    video_id = _uuid.uuid4()
+    source_id = str(video_id)
+    now = datetime.now(timezone.utc)
+    safe_title = title.strip() or filename.rsplit(".", 1)[0]
+
+    parsed_topic_id: uuid.UUID | None = None
+    if topic_id:
+        try:
+            parsed_topic_id = uuid.UUID(topic_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid topic_id format")
+
+    # Stream upload directly to S3
+    master_key = f"videos/{video_id}/master.mp4"
+    log.info("Uploading video file '%s' to S3 key %s", filename, master_key)
+    try:
+        file_bytes = await file.read()
+        file_size = len(file_bytes)
+        _s3.upload_fileobj(io.BytesIO(file_bytes), master_key, "video/mp4")
+    except Exception as exc:
+        log.exception("S3 upload failed for video %s", video_id)
+        raise HTTPException(status_code=500, detail=f"S3 upload failed: {exc}") from exc
+
+    video = Video(
+        id=video_id,
+        topic_id=parsed_topic_id,
+        source="upload",
+        source_id=source_id,
+        url=f"upload://{source_id}",
+        title=safe_title,
+        description="",
+        channel="",
+        views=0,
+        likes=0,
+        duration_sec=0,
+        thumbnail_url="",
+        status=VideoStatus.UPLOADED,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(video)
+    await db.flush()
+
+    db.add(Asset(
+        video_id=video_id,
+        type=AssetType.MASTER_VIDEO,
+        s3_key=master_key,
+        size_bytes=file_size,
+    ))
+    await db.commit()
+    await db.refresh(video)
+
+    log.info("Video %s uploaded (%d bytes), auto_process=%s", video_id, file_size, auto_process)
+
+    if auto_process:
+        try:
+            import app.tasks.celery_app  # noqa: F401
+            from app.tasks.pipeline_tasks import task_extract_audio_for_video
+            task_extract_audio_for_video.apply_async(args=[str(video_id)], queue="pipeline")
+        except Exception as exc:
+            log.warning("Could not trigger task_extract_audio_for_video: %s", exc)
+
+    return _to_read(video)
